@@ -1,4 +1,4 @@
-from django.db import models, connections, connection
+from django.db import models, connections, connection, transaction
 from django.contrib.contenttypes.generic import GenericRelation
 
 
@@ -160,7 +160,13 @@ class TriggerSet(object):
                 self.triggers[name] = [trigger]
 
     def install(self):
-        raise NotImplementedError
+        cursor = self.cursor()
+
+        for name, triggers in self.triggers.iteritems():
+            for i, trigger in enumerate(triggers):
+                sql, args = trigger.sql(name + "_%s" % i)
+                cursor.execute(sql, args)
+                transaction.commit_unless_managed(using=self.using)
 
     def drop(self):
         raise NotImplementedError

@@ -53,6 +53,22 @@ class TriggerActionUpdate(base.TriggerActionUpdate):
         return 'UPDATE %(table)s SET %(updates)s WHERE %(where)s' % locals(), params
 
 
+class TriggerConditionFieldChange(base.TriggerConditionFieldChange):
+    def sql(self, actions):
+        actions, params = super(TriggerConditionFieldChange, self).sql(actions)
+        when = ["(" + "OR".join(["(OLD.%s IS DISTINCT FROM NEW.%s)" % (f, f) for f in self.field_names]) + ")"]
+        when = "AND".join(when)
+
+        return """
+            BEGIN
+                IF %(when)s THEN
+                    %(actions)s
+                END IF;
+                RETURN NULL;
+            END;
+        """ % locals(), tuple(params)
+
+
 class Trigger(base.Trigger):
     def name(self):
         name = base.Trigger.name(self)
@@ -60,74 +76,30 @@ class Trigger(base.Trigger):
             name += "_%s" % self.content_type
         return name
 
-    def sql(self):
-        qn = self.connection.ops.quote_name
+    def sql(self, name):
+        actions, params = super(Trigger, self).sql()
 
-        name = self.name()
-        params = []
-        action_list = []
-        actions_added = set()
-        for a in self.actions:
-            sql, action_params = a.sql()
-            if sql:
-                if not sql.endswith(';'):
-                    sql += ';'
-                action_params = tuple(action_params)
-                if (sql, action_params) not in actions_added:
-                    actions_added.add((sql, action_params))
-                    action_list.extend(sql.split('\n'))
-                    params.extend(action_params)
+        if not self.condition:
+            actions = """
+                BEGIN
+                    %(actions)s
+                    RETURN NULL;
+                END;
+            """ % locals()
+
         table = self.db_table
         time = self.time.upper()
         event = self.event.upper()
-        content_type = self.content_type
-        ct_field = self.content_type_field
-
-        conditions = []
-
-        if event == "UPDATE":
-            for field, native_type in self.fields:
-                field = qn(field)
-                if native_type is None:
-                    # If Django didn't know what this field type should be
-                    # then compare it as text - Fixes a problem of trying to
-                    # compare PostGIS geometry fields.
-                    conditions.append("(OLD.%(f)s::%(t)s IS DISTINCT FROM NEW.%(f)s::%(t)s)" % {'f': field, 't': 'text'})
-                else:
-                    conditions.append("(OLD.%(f)s IS DISTINCT FROM NEW.%(f)s)" % {'f': field})
-
-            conditions = ["(%s)" % " OR ".join(conditions)]
-
-        if ct_field:
-            ct_field = qn(ct_field)
-            if event == "UPDATE":
-                conditions.append("(OLD.%(ctf)s = %(ct)s) OR (NEW.%(ctf)s = %(ct)s)" % {'ctf': ct_field, 'ct': content_type})
-            elif event == "INSERT":
-                conditions.append("(NEW.%s = %s)" % (ct_field, content_type))
-            elif event == "DELETE":
-                conditions.append("(OLD.%s = %s)" % (ct_field, content_type))
-
-        if conditions:
-            cond = " AND ".join(conditions)
-            actions = "\n            ".join(action_list)
-            actions = """IF %(cond)s THEN
-            %(actions)s
-        END IF;""" % locals()
-        else:
-            actions = "\n        ".join(action_list)
 
         sql = """
-CREATE OR REPLACE FUNCTION func_%(name)s()
-    RETURNS TRIGGER AS $$
-    BEGIN
-        %(actions)s
-        RETURN NULL;
-    END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER %(name)s
-    %(time)s %(event)s ON %(table)s
-    FOR EACH ROW EXECUTE PROCEDURE func_%(name)s();
-""" % locals()
+            CREATE OR REPLACE FUNCTION func_%(name)s()
+                RETURNS TRIGGER AS $$
+                    %(actions)s
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER %(name)s
+                %(time)s %(event)s ON %(table)s
+                FOR EACH ROW EXECUTE PROCEDURE func_%(name)s();
+        """ % locals()
         return sql, params
 
 
@@ -143,9 +115,12 @@ class TriggerSet(base.TriggerSet):
     def install(self):
         cursor = self.cursor()
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language WHERE lanname ='plpgsql'")
+
         if not cursor.fetchall():
             cursor.execute('CREATE LANGUAGE plpgsql')
-        for name, trigger in self.triggers.iteritems():
-            sql, args = trigger.sql()
-            cursor.execute(sql, args)
-            transaction.commit_unless_managed(using=self.using)
+
+        for name, triggers in self.triggers.iteritems():
+            for i, trigger in enumerate(triggers):
+                sql, args = trigger.sql(name + "_%s" % i)
+                cursor.execute(sql, args)
+                transaction.commit_unless_managed(using=self.using)

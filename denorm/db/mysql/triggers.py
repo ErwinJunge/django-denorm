@@ -46,63 +46,46 @@ class TriggerActionUpdate(base.TriggerActionUpdate):
         return 'UPDATE %(table)s SET %(updates)s WHERE %(where)s' % locals(), tuple(where_params)
 
 
+class TriggerConditionFieldChange(base.TriggerConditionFieldChange):
+    def sql(self, actions):
+        actions, params = super(TriggerConditionFieldChange, self).sql(actions)
+        when = ["(" + "OR".join(["(OLD.%s <=> NEW.%s)" % (f, f) for f in self.field_names]) + ")"]
+        when = "AND".join(when)
+
+        return """
+            IF %(when)s THEN
+                %(actions)s
+            END IF;
+        """ % locals(), tuple(params)
+
+
 class Trigger(base.Trigger):
 
-    def sql(self):
-        qn = self.connection.ops.quote_name
+    def sql(self, name):
+        actions, params = super(Trigger, self).sql()
 
-        name = self.name()
         if len(name) > 50:
             name = name[:45] + ''.join(
                 random.choice(string.ascii_uppercase + string.digits)
                 for x in range(5)
             )
-        params = []
-        action_list = []
-        actions_added = set()
-        for a in self.actions:
-            sql, action_params = a.sql()
-            if sql:
-                if not sql.endswith(';'):
-                    sql += ';'
-                action_params = tuple(action_params)
-                if (sql, action_params) not in actions_added:
-                    actions_added.add((sql, action_params))
-                    action_list.extend(sql.split('\n'))
-                    params.extend(action_params)
 
-        # FIXME: actions should depend on content_type and content_type_field, if applicable
-        # now we flag too many things dirty, e.g. a change for ('forum', 1) also flags ('post', 1)
+        if not self.condition:
+            actions = """
+                %(actions)s
+            """ % locals()
+
         table = self.db_table
         time = self.time.upper()
         event = self.event.upper()
 
-        conditions = []
-
-        if event == "UPDATE":
-            for field, native_type in self.fields:
-                field = qn(field)
-                # TODO: find out if we need to compare some fields as text like in postgres
-                conditions.append("(NOT(OLD.%(f)s <=> NEW.%(f)s))" % {'f': field})
-
-        if conditions:
-            cond = " OR ".join(conditions)
-            actions = "\n            ".join(action_list)
-            actions = """
-        IF %(cond)s THEN
-            %(actions)s
-        END IF;
-            """ % locals()
-        else:
-            actions = "\n        ".join(action_list)
-
         sql = """
-CREATE TRIGGER %(name)s
-    %(time)s %(event)s ON %(table)s
-    FOR EACH ROW BEGIN
-        %(actions)s
-    END;
-""" % locals()
+            CREATE TRIGGER %(name)s
+                %(time)s %(event)s ON %(table)s
+                FOR EACH ROW BEGIN
+                    %(actions)s
+                END;
+        """ % locals()
         return sql, tuple(params)
 
 
@@ -118,9 +101,3 @@ class TriggerSet(base.TriggerSet):
         for result in cursor.fetchall():
             if result[0].startswith('denorm_'):
                 cursor.execute('DROP TRIGGER %s;' % qn(result[0]))
-
-    def install(self):
-        cursor = self.cursor()
-        for name, trigger in self.triggers.iteritems():
-            sql, args = trigger.sql()
-            cursor.execute(sql, args)

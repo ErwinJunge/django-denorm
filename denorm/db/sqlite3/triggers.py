@@ -57,10 +57,10 @@ class TriggerConditionFieldChange(base.TriggerConditionFieldChange):
         when = "WHEN(%s)" % (when,)
 
         return """
-    FOR EACH ROW %(when)s BEGIN
-        %(actions)s
-    END;
-""" % locals(), tuple(params)
+            FOR EACH ROW %(when)s BEGIN
+                %(actions)s
+            END;
+        """ % locals(), tuple(params)
 
 
 class Trigger(base.Trigger):
@@ -75,19 +75,19 @@ class Trigger(base.Trigger):
         actions, params = super(Trigger, self).sql()
         if not self.condition:
             actions = """
-        FOR EACH ROW BEGIN
-        %(actions)s
-        END;
-""" % locals()
+                FOR EACH ROW BEGIN
+                    %(actions)s
+                END;
+            """ % locals()
         table = self.db_table
         time = self.time.upper()
         event = self.event.upper()
 
         return """
-CREATE TRIGGER %(name)s
-    %(time)s %(event)s ON %(table)s
-    %(actions)s
-""" % locals(), tuple(params)
+            CREATE TRIGGER %(name)s
+                %(time)s %(event)s ON %(table)s
+                %(actions)s
+        """ % locals(), tuple(params)
 
 
 class TriggerSet(base.TriggerSet):
@@ -100,11 +100,3 @@ class TriggerSet(base.TriggerSet):
             cursor.execute("DROP TRIGGER %s;" % (qn(trigger_name),))
             transaction.commit_unless_managed(using=self.using)
 
-    def install(self):
-        cursor = self.cursor()
-
-        for name, triggers in self.triggers.iteritems():
-            for i, trigger in enumerate(triggers):
-                sql, args = trigger.sql(name + "_%s" % i)
-                cursor.execute(sql, args)
-                transaction.commit_unless_managed(using=self.using)
