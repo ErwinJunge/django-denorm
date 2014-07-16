@@ -1,6 +1,6 @@
 from denorm.fields import cached, denormalized, CountField, CacheKeyField
 from denorm.denorms import flush, rebuildall
-from denorm.dependencies import depend_on_related
+from denorm.dependencies import depend_on
 
 from django.conf import settings
 if hasattr(settings, 'DENORM_FLUSH_AFTER_REQUEST'):

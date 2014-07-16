@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 
 from denorm.fields import SumField
-from denorm import denormalized, depend_on_related, CountField, CacheKeyField, cached
+from denorm import denormalized, depend_on, CountField, CacheKeyField, cached
 
 
 settings.DENORM_MODEL = 'denorm.RealDenormModel'
@@ -21,7 +21,7 @@ class FailingTriggersModelB(models.Model):
     a = models.ForeignKey(FailingTriggersModelA)
 
     @denormalized(models.TextField)
-    @depend_on_related(FailingTriggersModelA)
+    @depend_on('a__SomeWeirdName')
     def SomeWeirdName(self):
         return self.a.SomeWeirdName
 
@@ -30,7 +30,7 @@ class CachedModelA(models.Model):
     b = models.ForeignKey('CachedModelB')
 
     @cached(cache)
-    @depend_on_related('CachedModelB')
+    @depend_on('b__data')
     def cached_data(self):
         return {
             'upper': self.b.data.upper(),
@@ -85,7 +85,9 @@ class TaggedModel(models.Model):
     tags = GenericRelation(Tag)
 
     @denormalized(models.TextField)
-    @depend_on_related(Tag)
+    @depend_on('tags__name')
+    @depend_on('tags__object_id')
+    @depend_on('tags__content_type_id')
     def tags_string(self):
         return ', '.join(sorted([t.name for t in self.tags.all()]))
 
@@ -100,15 +102,15 @@ class Forum(TaggedModel):
     post_count = CountField('post_set')
 
     cachekey = CacheKeyField()
-    cachekey.depend_on_related('Post')
+    cachekey.depend_on('post__forum_id')
 
     @denormalized(models.CharField, max_length=255)
-    @depend_on_related('Post')
+    @depend_on('post__author_name')
     def author_names(self):
         return ', '.join((m.author_name for m in self.post_set.all()))
 
     @denormalized(models.ManyToManyField, 'Member', null=True, blank=True)
-    @depend_on_related('Post')
+    @depend_on('post__author_id')
     def authors(self):
         return [m.author for m in self.post_set.all() if m.author]
 
@@ -117,7 +119,8 @@ class Forum(TaggedModel):
     parent_forum = models.ForeignKey('self', blank=True, null=True)
 
     @denormalized(models.TextField)
-    @depend_on_related('self', type='forward')
+    @depend_on('parent_forum__path')
+    @depend_on('title')
     def path(self):
         if self.parent_forum:
             return self.parent_forum.path + self.title + '/'
@@ -131,14 +134,13 @@ class Post(TaggedModel):
     response_to = models.ForeignKey('self', blank=True, null=True, related_name='responses')
     title = models.CharField(max_length=255, blank=True)
 
-    # Brings down the forum title
     @denormalized(models.CharField, max_length=255)
-    @depend_on_related(Forum)
+    @depend_on('forum__title')
     def forum_title(self):
         return self.forum.title
 
     @denormalized(models.CharField, max_length=255)
-    @depend_on_related('Member', foreign_key="author")
+    @depend_on('author__name')
     def author_name(self):
         if self.author:
             return self.author.name
@@ -146,7 +148,7 @@ class Post(TaggedModel):
             return ''
 
     @denormalized(models.PositiveIntegerField)
-    @depend_on_related('self', type='backward')
+    @depend_on('responses')
     def response_count(self):
         # Work around odd issue during testing with PostgresDB
         if not self.pk:
@@ -162,10 +164,10 @@ class Attachment(models.Model):
     post = models.ForeignKey(Post, blank=True, null=True)
 
     cachekey = CacheKeyField()
-    cachekey.depend_on_related('Post')
+    cachekey.depend_on('post__title')
 
     @denormalized(models.ForeignKey, Forum, blank=True, null=True)
-    @depend_on_related(Post)
+    @depend_on('post__forum_id')
     def forum(self):
         if self.post and self.post.forum:
             if self.forum_as_object:
@@ -183,14 +185,16 @@ class Member(models.Model):
     bookmarks = models.ManyToManyField('Post', blank=True)
 
     cachekey = CacheKeyField()
-    cachekey.depend_on_related('Post', foreign_key='bookmarks')
+    cachekey.depend_on('bookmarks__title')
 
     @denormalized(models.CharField, max_length=255)
+    @depend_on('first_name')
+    @depend_on('name')
     def full_name(self):
         return u"%s %s" % (self.first_name, self.name)
 
     @denormalized(models.TextField, null=True, blank=True)
-    @depend_on_related('Post', foreign_key="bookmarks")
+    @depend_on('bookmarks__title')
     def bookmark_titles(self):
         if self.id:
             return '\n'.join([p.title for p in self.bookmarks.all()])
@@ -215,26 +219,24 @@ class SkipCommentWithoutSkip(SkipComment):
     # Skip feature test model without a skip parameter on an updatable field.
     # he updatable field will not be skipped.
     @denormalized(models.TextField)
-    @depend_on_related(SkipPost)
+    @depend_on('post__text')
     def post_text(self):
         return self.post.text
 
 
 class SkipCommentWithSkip(SkipComment):
     # Skip feature test model with a skip parameter on an updatable field.
-    @denormalized(models.TextField, skip=('updated_on',))
-    @depend_on_related(SkipPost)
+    @denormalized(models.TextField)
+    @depend_on('post__text')
     def post_text(self):
         return self.post.text
 
 
 class SkipCommentWithAttributeSkip(SkipComment):
     @denormalized(models.TextField)
-    @depend_on_related(SkipPost)
+    @depend_on('post__text')
     def post_text(self):
         return self.post.text
-
-    denorm_always_skip = ('updated_on',)
 
 
 if not hasattr(django.db.backend, 'sqlite3'):
@@ -255,3 +257,9 @@ if not hasattr(django.db.backend, 'sqlite3'):
         parent = models.ForeignKey(FilterCountModel, related_name='items')
         active = models.BooleanField(default=False)
         text = models.CharField(max_length=10, default='')
+
+
+from denorm.denorms import alldenorms
+
+for denorm in alldenorms:
+    denorm.setup()
