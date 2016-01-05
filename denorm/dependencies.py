@@ -320,16 +320,23 @@ class CallbackDependOnRelated(DependOnRelated):
                     **{self.field.model._meta.pk.get_attname_column()[1]: "NEW.%s" % qn(self.other_model._meta.pk.get_attname_column()[1])}
                 )
             )
-            action_old = triggers.TriggerActionInsert(
-                model=denorm.models.DirtyInstance,
-                columns=("content_type_id", "object_id"),
-                values=triggers.TriggerNestedSelect(
-                    self.field.model._meta.db_table,
-                    (content_type,
-                        self.field.get_attname_column()[1]),
-                    **{self.field.model._meta.pk.get_attname_column()[1]: "OLD.%s" % qn(self.other_model._meta.pk.get_attname_column()[1])}
+            if self.field.model == self.other_model:
+                action_old = triggers.TriggerActionInsert(
+                    model=denorm.models.DirtyInstance,
+                    columns=("content_type_id", "object_id"),
+                    values=(content_type, "OLD.%s" % qn(self.field.get_attname_column()[1])),
                 )
-            )
+            else:
+                action_old = triggers.TriggerActionInsert(
+                    model=denorm.models.DirtyInstance,
+                    columns=("content_type_id", "object_id"),
+                    values=triggers.TriggerNestedSelect(
+                        self.field.model._meta.db_table,
+                        (content_type,
+                            self.field.get_attname_column()[1]),
+                        **{self.field.model._meta.pk.get_attname_column()[1]: "OLD.%s" % qn(self.other_model._meta.pk.get_attname_column()[1])}
+                    )
+                )
             return [
                 triggers.Trigger(self.other_model, "after", "update", [action_new, action_old], content_type, using, self.skip),
                 triggers.Trigger(self.other_model, "after", "insert", [action_new], content_type, using, self.skip),
