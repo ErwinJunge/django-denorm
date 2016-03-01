@@ -138,7 +138,7 @@ class TriggerSet(base.TriggerSet):
         cursor = self.cursor()
         cursor.execute("SELECT pg_class.relname, pg_trigger.tgname FROM pg_trigger LEFT JOIN pg_class ON (pg_trigger.tgrelid = pg_class.oid) WHERE pg_trigger.tgname LIKE 'denorm_%%';")
         for table_name, trigger_name in cursor.fetchall():
-            cursor.execute('DROP TRIGGER %s ON %s;' % (qn(trigger_name), qn(table_name)))
+            cursor.execute('DROP TRIGGER IF EXISTS %s ON %s;' % (qn(trigger_name), qn(table_name)))
 
     def drop(self):
         try:
