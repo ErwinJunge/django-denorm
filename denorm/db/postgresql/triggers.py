@@ -1,6 +1,11 @@
 from django.db import transaction
 from denorm.db import base
 from django.db.backends.utils import truncate_name
+from boardinghouse.schema import (
+    is_shared_model,
+    is_shared_table,
+)
+from boardinghouse.models import Schema
 
 
 class RandomBigInt(base.RandomBigInt):
@@ -155,7 +160,17 @@ class TriggerSet(base.TriggerSet):
             cursor.execute('CREATE LANGUAGE plpgsql')
         for name, trigger in self.triggers.items():
             sql, args = trigger.sql()
-            cursor.execute(sql, args)
+            if trigger.model is None:
+                shared = is_shared_table(trigger.db_table)
+            else:
+                shared = is_shared_model(trigger.model)
+            if shared:
+                cursor.execute(sql, args)
+            else:
+                for schema in Schema.objects.all():
+                    schema.activate(cursor)
+                    cursor.execute(sql, args)
+                    schema.deactivate(cursor)
 
     def install(self):
         try:
