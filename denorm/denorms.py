@@ -22,6 +22,8 @@ from django.db.models.sql.query import Query
 from django.db.models.sql.where import WhereNode
 import django
 from decimal import Decimal
+from boardinghouse.models import Schema
+
 
 def many_to_many_pre_save(sender, instance, **kwargs):
     """
@@ -537,38 +539,42 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
     Updates all models containing denormalized fields.
     Used by the 'denormalize' management command.
     """
-    alldenorms = get_alldenorms()
-    models = {}
-    for denorm in alldenorms:
-        current_app_label = denorm.model._meta.app_label
-        try:
-            current_model_name = denorm.model._meta.model.__name__
-        except AttributeError: # In Django 1.5
-            current_model_name = denorm.model.__name__
-        current_app_model = '%s.%s' % (current_app_label, current_model_name)
-        if model_name is None or model_name in (current_app_label, current_model_name, current_app_model):
-            if field_name is None or field_name == denorm.fieldname:
-                models.setdefault(denorm.model, []).append(denorm)
+    for schema in Schema.objects.all():
+        schema.activate()
+        alldenorms = get_alldenorms()
+        models = {}
 
-    i = 0
-    for model, denorms in models.items():
-        if verbose:
-            for denorm in denorms:
-                msg = 'rebuilding', '%s/%s' % (i + 1, len(alldenorms)), denorm.fieldname, 'in', denorm.model
-                print(msg)
-                i += 1
-        for instance in model.objects.all():
-            fields = {}
-            save = False
-            for denorm in denorms:
-                _fields = denorm.update(instance)
-                if _fields is not None:
-                    fields.update(_fields)
-                    save = True
-            if save:
-                model.objects.filter(pk=instance.pk).update(**fields)
+        for denorm in alldenorms:
+            current_app_label = denorm.model._meta.app_label
+            try:
+                current_model_name = denorm.model._meta.model.__name__
+            except AttributeError: # In Django 1.5
+                current_model_name = denorm.model.__name__
+            current_app_model = '%s.%s' % (current_app_label, current_model_name)
+            if model_name is None or model_name in (current_app_label, current_model_name, current_app_model):
+                if field_name is None or field_name == denorm.fieldname:
+                    models.setdefault(denorm.model, []).append(denorm)
 
-    flush()
+        i = 0
+        for model, denorms in models.items():
+            if verbose:
+                for denorm in denorms:
+                    msg = 'rebuilding', '%s/%s' % (i + 1, len(alldenorms)), denorm.fieldname, 'in', denorm.model
+                    print(msg)
+                    i += 1
+            for instance in model.objects.all():
+                fields = {}
+                save = False
+                for denorm in denorms:
+                    _fields = denorm.update(instance)
+                    if _fields is not None:
+                        fields.update(_fields)
+                        save = True
+                if save:
+                    model.objects.filter(pk=instance.pk).update(**fields)
+
+        flush()
+        schema.deactivate()
 
 
 def drop_triggers(using=None):
