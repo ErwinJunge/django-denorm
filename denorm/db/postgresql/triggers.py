@@ -5,7 +5,7 @@ from boardinghouse.schema import (
     is_shared_model,
     is_shared_table,
 )
-from boardinghouse.models import Schema
+from boardinghouse.schema import get_schema_model
 
 
 class RandomBigInt(base.RandomBigInt):
@@ -154,6 +154,7 @@ class TriggerSet(base.TriggerSet):
             transaction.commit_unless_managed(using=self.using)
 
     def install_atomic(self):
+        Schema = get_schema_model()
         cursor = self.cursor()
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language WHERE lanname ='plpgsql'")
         if not cursor.fetchall():

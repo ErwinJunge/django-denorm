@@ -22,7 +22,7 @@ from django.db.models.sql.query import Query
 from django.db.models.sql.where import WhereNode
 import django
 from decimal import Decimal
-from boardinghouse.models import Schema
+from boardinghouse.schema import get_schema_model
 
 
 def many_to_many_pre_save(sender, instance, **kwargs):
@@ -539,6 +539,7 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
     Updates all models containing denormalized fields.
     Used by the 'denormalize' management command.
     """
+    Schema = get_schema_model()
     for schema in Schema.objects.all():
         schema.activate()
         alldenorms = get_alldenorms()

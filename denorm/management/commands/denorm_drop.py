@@ -4,7 +4,7 @@ from django.core.management.base import NoArgsCommand
 from django.db import DEFAULT_DB_ALIAS
 
 from denorm import denorms
-from boardinghouse.models import Schema
+from boardinghouse.schema import get_schema_model
 
 
 class Command(NoArgsCommand):
@@ -17,6 +17,7 @@ class Command(NoArgsCommand):
 
     def handle_noargs(self, **options):
         using = options['database']
+        Schema = get_schema_model()
         for schema in Schema.objects.all():
             schema.activate()
             denorms.drop_triggers(using=using)
