@@ -567,6 +567,7 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
                     save = True
             if save:
                 model.objects.filter(pk=instance.pk).update(**fields)
+            flush()
 
     flush()
 
