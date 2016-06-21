@@ -534,6 +534,23 @@ class CountDenorm(AggregateDenorm):
         return self.get_decrement_value(using)
 
 
+def rebuildone(verbose, denorms, model):
+    if verbose:
+        for denorm in denorms:
+            msg = 'rebuilding', denorm.fieldname, 'in', denorm.model
+            print(msg)
+    for instance in model.objects.iterator():
+        fields = {}
+        save = False
+        for denorm in denorms:
+            _fields = denorm.update(instance)
+            if _fields is not None:
+                fields.update(_fields)
+                save = True
+        if save:
+            model.objects.filter(pk=instance.pk).update(**fields)
+
+
 def rebuildall(verbose=False, model_name=None, field_name=None):
     """
     Updates all models containing denormalized fields.
@@ -553,24 +570,8 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
                 models.setdefault(denorm.model, []).append(denorm)
 
     with transaction.atomic():
-        i = 0
         for model, denorms in models.items():
-            if verbose:
-                for denorm in denorms:
-                    msg = 'rebuilding', '%s/%s' % (i + 1, len(alldenorms)), denorm.fieldname, 'in', denorm.model
-                    print(msg)
-                    i += 1
-            for instance in model.objects.all():
-                fields = {}
-                save = False
-                for denorm in denorms:
-                    _fields = denorm.update(instance)
-                    if _fields is not None:
-                        fields.update(_fields)
-                        save = True
-                if save:
-                    model.objects.filter(pk=instance.pk).update(**fields)
-
+            rebuildone(verbose, denorms, model)
         flush()
 
 
