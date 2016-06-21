@@ -22,6 +22,8 @@ from django.db.models.sql.query import Query
 from django.db.models.sql.where import WhereNode
 import django
 from decimal import Decimal
+from django.db import transaction
+
 
 def many_to_many_pre_save(sender, instance, **kwargs):
     """
