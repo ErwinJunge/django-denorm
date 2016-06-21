@@ -557,16 +557,17 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
                 msg = 'rebuilding', '%s/%s' % (i + 1, len(alldenorms)), denorm.fieldname, 'in', denorm.model
                 print(msg)
                 i += 1
-        for instance in model.objects.all():
-            fields = {}
-            save = False
-            for denorm in denorms:
-                _fields = denorm.update(instance)
-                if _fields is not None:
-                    fields.update(_fields)
-                    save = True
-            if save:
-                model.objects.filter(pk=instance.pk).update(**fields)
+        with transaction.atomic():
+            for instance in model.objects.all():
+                fields = {}
+                save = False
+                for denorm in denorms:
+                    _fields = denorm.update(instance)
+                    if _fields is not None:
+                        fields.update(_fields)
+                        save = True
+                if save:
+                    model.objects.filter(pk=instance.pk).update(**fields)
             flush()
 
     flush()
