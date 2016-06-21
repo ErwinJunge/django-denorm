@@ -550,14 +550,14 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
             if field_name is None or field_name == denorm.fieldname:
                 models.setdefault(denorm.model, []).append(denorm)
 
-    i = 0
-    for model, denorms in models.items():
-        if verbose:
-            for denorm in denorms:
-                msg = 'rebuilding', '%s/%s' % (i + 1, len(alldenorms)), denorm.fieldname, 'in', denorm.model
-                print(msg)
-                i += 1
-        with transaction.atomic():
+    with transaction.atomic():
+        i = 0
+        for model, denorms in models.items():
+            if verbose:
+                for denorm in denorms:
+                    msg = 'rebuilding', '%s/%s' % (i + 1, len(alldenorms)), denorm.fieldname, 'in', denorm.model
+                    print(msg)
+                    i += 1
             for instance in model.objects.all():
                 fields = {}
                 save = False
@@ -568,9 +568,8 @@ def rebuildall(verbose=False, model_name=None, field_name=None):
                         save = True
                 if save:
                     model.objects.filter(pk=instance.pk).update(**fields)
-            flush()
 
-    flush()
+        flush()
 
 
 def drop_triggers(using=None):
