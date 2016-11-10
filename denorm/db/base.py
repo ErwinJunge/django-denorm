@@ -119,7 +119,7 @@ class Trigger(object):
                     pass
                 else:
                     if not v and k.attname not in skip:
-                        self.fields.append((k.attname, k.db_type(connection=self.connection)))
+                        self.fields.append((k.db_column or k.attname, k.db_type(connection=self.connection)))
 
         else:
             raise NotImplementedError
