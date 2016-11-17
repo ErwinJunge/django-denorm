@@ -83,9 +83,9 @@ def get_alldenorms():
 
 
 class Denorm(object):
-    def __init__(self, skip=None):
+    def __init__(self):
         self.func = None
-        self.skip = skip
+        self.depend = []
 
     def get_quote_name(self, using):
         if using:
@@ -94,18 +94,23 @@ class Denorm(object):
             cconnection = connection
         return cconnection.ops.quote_name
 
-    def setup(self, **kwargs):
+    def register(self, **kwargs):
         """
-        Adds 'self' to the global denorm list
-        and connects all needed signals.
+        Adds 'self' to the global denorm list.
         """
         pass
+
+    def setup(self):
+        """
+        Calls setup() on all DenormDependency resolvers
+        """
+        for dependency in self.depend:
+            dependency.setup(self.model)
 
     def update(self, instance):
         """
         Updates the denormalizations in all instances in the queryset 'qs'.
         """
-
         # Get attribute name (required for denormalising ForeignKeys)
         field = instance._meta.get_field(self.fieldname)
         attname = field.attname
@@ -152,15 +157,6 @@ class BaseCallbackDenorm(Denorm):
     as a callback.
     """
 
-    def setup(self, **kwargs):
-        """
-        Calls setup() on all DenormDependency resolvers
-        """
-        super(BaseCallbackDenorm, self).setup(**kwargs)
-
-        for dependency in self.depend:
-            dependency.setup(self.model)
-
     def get_triggers(self, using):
         """
         Creates a list of all triggers needed to keep track of changes
@@ -176,53 +172,12 @@ class BaseCallbackDenorm(Denorm):
         return trigger_list + super(BaseCallbackDenorm, self).get_triggers(using=using)
 
 
-class CallbackDenorm(BaseCallbackDenorm):
-    """
-    As above, but with extra triggers on self as described below
-    """
-
-    def get_triggers(self, using):
-        qn = self.get_quote_name(using)
-
-        content_type = str(contenttypes.models.ContentType.objects.get_for_model(self.model).pk)
-
-        # Create a trigger that marks any updated or newly created
-        # instance of the model containing the denormalized field
-        # as dirty.
-        # This is only really needed if the instance was changed without
-        # using the ORM or if it was part of a bulk update.
-        # In those cases the self_save_handler won't get called by the
-        # pre_save signal, so we need to ensure flush() does this later.
-        from .models import DirtyInstance
-        from .db import triggers
-        action = triggers.TriggerActionInsert(
-            model=DirtyInstance,
-            columns=("content_type_id", "object_id"),
-            values=(content_type, "NEW.%s" % qn(self.model._meta.pk.get_attname_column()[1]))
-        )
-        trigger_list = [
-            triggers.Trigger(self.model, "after", "update", [action], content_type, using, self.skip),
-            triggers.Trigger(self.model, "after", "insert", [action], content_type, using, self.skip),
-        ]
-
-        return trigger_list + super(CallbackDenorm, self).get_triggers(using=using)
-
-
 class BaseCacheKeyDenorm(Denorm):
-    def __init__(self, depend_on_related, *args, **kwargs):
-        self.depend = depend_on_related
+    def __init__(self, depend_on, *args, **kwargs):
         super(BaseCacheKeyDenorm, self).__init__(*args, **kwargs)
+        self.depend.extend(depend_on)
         import random
         self.func = lambda o: random.randint(-9223372036854775808, 9223372036854775807)
-
-    def setup(self, **kwargs):
-        """
-        Calls setup() on all DenormDependency resolvers
-        """
-        super(BaseCacheKeyDenorm, self).setup(**kwargs)
-
-        for dependency in self.depend:
-            dependency.setup(self.model)
 
     def get_triggers(self, using):
         """
@@ -310,15 +265,9 @@ class TriggerFilterQuery(sql.Query):
 class AggregateDenorm(Denorm):
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, skip=None):
+    def __init__(self):
+        super(AggregateDenorm, self).__init__()
         self.manager = None
-        self.skip = skip
-
-    def setup(self, sender, **kwargs):
-        # as we connected to the ``class_prepared`` signal for any sender
-        # and we only need to setup once, check if the sender is our model.
-        if sender is self.model:
-            super(AggregateDenorm, self).setup(sender=sender, **kwargs)
 
         # related managers will only be available after both models are initialized
         # so check if its available already, and get our manager
@@ -365,11 +314,9 @@ class AggregateDenorm(Denorm):
             where=(' AND '.join(related_dec_where), related_where_params),
         )
         trigger_list = [
-            triggers.Trigger(related_field, "after", "update", [related_increment, related_decrement], content_type,
-                using,
-                self.skip),
-            triggers.Trigger(related_field, "after", "insert", [related_increment], content_type, using, self.skip),
-            triggers.Trigger(related_field, "after", "delete", [related_decrement], content_type, using, self.skip),
+            triggers.Trigger(related_field, "after", "update", [related_increment, related_decrement], content_type, using),
+            triggers.Trigger(related_field, "after", "insert", [related_increment], content_type, using),
+            triggers.Trigger(related_field, "after", "delete", [related_decrement], content_type, using),
         ]
         return trigger_list
 
@@ -446,9 +393,9 @@ class AggregateDenorm(Denorm):
         )
 
         trigger_list = [
-            triggers.Trigger(related_model, "after", "update", [increment, decrement], content_type, using, self.skip),
-            triggers.Trigger(related_model, "after", "insert", [increment], content_type, using, self.skip),
-            triggers.Trigger(related_model, "after", "delete", [decrement], content_type, using, self.skip),
+            triggers.Trigger(related_model, "after", "update", [increment, decrement], content_type, using),
+            triggers.Trigger(related_model, "after", "insert", [increment], content_type, using),
+            triggers.Trigger(related_model, "after", "delete", [decrement], content_type, using),
         ]
         if isinstance(related_field, ManyToManyField):
             trigger_list.extend(self.m2m_triggers(content_type, fk_name, related_field, using))
@@ -471,8 +418,8 @@ class SumDenorm(AggregateDenorm):
     """
     Handles denormalization of a sum field by doing incrementally updates.
     """
-    def __init__(self, skip=None, field=None):
-        super(SumDenorm, self).__init__(skip)
+    def __init__(self, field=None):
+        super(SumDenorm, self).__init__()
         # in case we want to set the value without relying on the
         # correctness of the incremental updates we create a function that
         # calculates it from scratch.
@@ -522,8 +469,8 @@ class CountDenorm(AggregateDenorm):
     updates.
     """
 
-    def __init__(self, skip=None):
-        super(CountDenorm, self).__init__(skip)
+    def __init__(self):
+        super(CountDenorm, self).__init__()
         # in case we want to set the value without relying on the
         # correctness of the incremental updates we create a function that
         # calculates it from scratch.

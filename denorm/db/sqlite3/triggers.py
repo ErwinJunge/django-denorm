@@ -49,6 +49,20 @@ class TriggerActionUpdate(base.TriggerActionUpdate):
         return 'UPDATE %(table)s SET %(updates)s WHERE %(where)s' % locals(), where_params
 
 
+class TriggerConditionFieldChange(base.TriggerConditionFieldChange):
+    def sql(self, actions):
+        actions, params = super(TriggerConditionFieldChange, self).sql(actions)
+        when = ["(" + "OR".join(["(OLD.%s IS NOT NEW.%s)" % (f, f) for f in self.field_names]) + ")"]
+        when = "AND".join(when)
+        when = "WHEN(%s)" % (when,)
+
+        return """
+            FOR EACH ROW %(when)s BEGIN
+                %(actions)s
+            END;
+        """ % locals(), tuple(params)
+
+
 class Trigger(base.Trigger):
 
     def name(self):
@@ -57,53 +71,23 @@ class Trigger(base.Trigger):
             name += "_%s" % self.content_type
         return name
 
-    def sql(self):
-        qn = self.connection.ops.quote_name
-
-        name = self.name()
-        params = []
-        action_list = []
-        actions_added = set()
-        for a in self.actions:
-            sql, action_params = a.sql()
-            if sql:
-                if not sql.endswith(';'):
-                    sql += ';'
-                action_params = tuple(action_params)
-                if (sql, action_params) not in actions_added:
-                    actions_added.add((sql, action_params))
-                    action_list.extend(sql.split('\n'))
-                    params.extend(action_params)
-        actions = "\n        ".join(action_list)
+    def sql(self, name):
+        actions, params = super(Trigger, self).sql()
+        if not self.condition:
+            actions = """
+                FOR EACH ROW BEGIN
+                    %(actions)s
+                END;
+            """ % locals()
         table = self.db_table
         time = self.time.upper()
         event = self.event.upper()
-        content_type = self.content_type
-        ct_field = self.content_type_field
-
-        when = []
-        if event == "UPDATE":
-            when.append("(" + "OR".join(["(OLD.%s IS NOT NEW.%s)" % (qn(f), qn(f)) for f, t in self.fields]) + ")")
-        if ct_field:
-            ct_field = qn(ct_field)
-            if event == "DELETE":
-                when.append("(OLD.%s == %s)" % (ct_field, content_type))
-            elif event == "INSERT":
-                when.append("(NEW.%s == %s)" % (ct_field, content_type))
-            elif event == "UPDATE":
-                when.append("((OLD.%(ctf)s == %(ct)s) OR (NEW.%(ctf)s == %(ct)s))" % {'ctf': ct_field, 'ct': content_type})
-
-        when = "AND".join(when)
-        if when:
-            when = "WHEN(%s)" % (when,)
 
         return """
-CREATE TRIGGER %(name)s
-    %(time)s %(event)s ON %(table)s
-    FOR EACH ROW %(when)s BEGIN
-        %(actions)s
-    END;
-""" % locals(), tuple(params)
+            CREATE TRIGGER %(name)s
+                %(time)s %(event)s ON %(table)s
+                %(actions)s
+        """ % locals(), tuple(params)
 
 
 class TriggerSet(base.TriggerSet):

@@ -1,5 +1,6 @@
-from django.db import models, connections, connection
+from django.db import models, connections, connection, transaction
 from ..helpers import remote_field_model
+from django.contrib.contenttypes.generic import GenericRelation
 
 
 class RandomBigInt(object):
@@ -64,17 +65,40 @@ def get_fields_with_model(model, meta):
     except AttributeError:
         return meta.get_fields_with_model()
 
+
+class TriggerCondition(object):
+    def sql(self, actions):
+        params, action_set = [], set()
+
+        for action in actions:
+            sql, action_params = action.sql()
+
+            if sql:
+                action_set.add(sql)
+                params.extend(action_params)
+
+        return ";\n   ".join(action_set) + ';', params
+
+
+class TriggerConditionFieldChange(TriggerCondition):
+    def __init__(self, field_names):
+        if isinstance(field_names, (list, tuple)):
+            self.field_names = field_names
+        else:
+            self.field_names = (field_names,)
+
+
 class Trigger(object):
 
-    def __init__(self, subject, time, event, actions, content_type, using=None, skip=None):
+    def __init__(self, subject, time, event, actions, content_type, using=None, condition=None):
         self.subject = subject
         self.time = time
         self.event = event
         self.content_type = content_type
         self.content_type_field = None
-        self.actions = []
-        self.append(actions)
+        self.actions = actions
         self.using = using
+        self.condition = condition
 
         if self.using:
             self.connection = connections[self.using]
@@ -89,7 +113,6 @@ class Trigger(object):
         if isinstance(subject, models.ManyToManyField):
             self.model = None
             self.db_table = subject.m2m_db_table()
-            self.fields = [(subject.m2m_column_name(), ''), (subject.m2m_reverse_name(), '')]
 
         elif isinstance(subject, GenericRelation):
             self.model = None
@@ -100,36 +123,13 @@ class Trigger(object):
         elif isinstance(subject, models.ForeignKey):
             self.model = subject.model
             self.db_table = self.model._meta.db_table
-            skip = skip or () + getattr(self.model, 'denorm_always_skip', ())
-            self.fields = [(k.attname, k.db_type(connection=self.connection)) for k, v in get_fields_with_model(subject.model, self.model._meta) if not v and k.attname not in skip]
 
         elif hasattr(subject, "_meta"):
             self.model = subject
             self.db_table = self.model._meta.db_table
-            # FIXME: need to check get_parent_list and add triggers to those
-            # The below will only check the fields on *this* model, not parents
-            skip = skip or () + getattr(self.model, 'denorm_always_skip', ())
-            self.fields = []
-            try:
-                from django.db.models.fields.related import ForeignObjectRel
-            except:
-                from django.db.models.related import RelatedObject as ForeignObjectRel
-            for k, v in get_fields_with_model(subject, self.model._meta):
-                if isinstance(k, ForeignObjectRel):
-                    pass
-                else:
-                    if not v and k.attname not in skip:
-                        self.fields.append((k.db_column or k.attname, k.db_type(connection=self.connection)))
 
         else:
             raise NotImplementedError
-
-    def append(self, actions):
-        if not isinstance(actions, list):
-            actions = [actions]
-
-        for action in actions:
-            self.actions.append(action)
 
     def name(self):
         return "_".join([
@@ -142,7 +142,19 @@ class Trigger(object):
         ])
 
     def sql(self):
-        raise NotImplementedError
+        if self.condition:
+            return self.condition.sql(self.actions)
+        else:
+            params, action_set = [], set()
+
+            for action in self.actions:
+                sql, action_params = action.sql()
+
+                if sql:
+                    action_set.add(sql)
+                    params.extend(action_params)
+
+            return ";\n   ".join(action_set) + ';', params
 
 
 class TriggerSet(object):
@@ -164,12 +176,18 @@ class TriggerSet(object):
         for trigger in triggers:
             name = trigger.name()
             if name in self.triggers:
-                self.triggers[name].append(trigger.actions)
+                self.triggers[name].append(trigger)
             else:
-                self.triggers[name] = trigger
+                self.triggers[name] = [trigger]
 
     def install(self):
-        raise NotImplementedError
+        cursor = self.cursor()
+
+        for name, triggers in self.triggers.iteritems():
+            for i, trigger in enumerate(triggers):
+                sql, args = trigger.sql(name + "_%s" % i)
+                cursor.execute(sql, args)
+                transaction.commit_unless_managed(using=self.using)
 
     def drop(self):
         raise NotImplementedError
