@@ -14,4 +14,5 @@ if hasattr(settings, 'DENORM_FLUSH_AFTER_REQUEST') and settings.DENORM_FLUSH_AFT
         flush()
     request_finished.connect(do_flush)
 
-__all__ = ['cached', 'denormalized', 'depend_on_related', 'flush', 'rebuildall', 'CountField', 'CacheKeyField']
+__all__ = ['cached', 'denormalized', 'depend_on', 'flush', 'rebuildall', 'CountField', 'CacheKeyField']
+default_app_config = 'denorm.apps.DenormConfig'

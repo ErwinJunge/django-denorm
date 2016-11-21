@@ -16,9 +16,13 @@ class DirtyInstance(models.Model):
     """
     class Meta:
         app_label="denorm"
+        unique_together = (
+            ('content_type', 'object_id'),
+        )
 
     content_type = models.ForeignKey(ContentType)
-    object_id = models.TextField(blank=True, null=True)
+    # object_id = models.TextField(blank=True, null=True)
+    object_id = models.PositiveIntegerField(blank=True, null=True)
     content_object = GenericForeignKey()
 
     def __str__(self):

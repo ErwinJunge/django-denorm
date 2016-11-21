@@ -44,7 +44,6 @@ def denormalized(DBField, *args, **kwargs):
             self.denorm.model = cls
             self.denorm.fieldname = name
             self.field_args = (args, kwargs)
-            models.signals.class_prepared.connect(self.denorm.register, sender=cls)
             # Add The many to many signal for this class
             models.signals.pre_save.connect(denorms.many_to_many_pre_save, sender=cls)
             models.signals.post_save.connect(denorms.many_to_many_post_save, sender=cls)
@@ -140,7 +139,6 @@ class AggregateField(models.PositiveIntegerField):
     def contribute_to_class(self, cls, name, *args, **kwargs):
         self.denorm.model = cls
         self.denorm.fieldname = name
-        models.signals.class_prepared.connect(self.denorm.register, sender=cls)
         super(AggregateField, self).contribute_to_class(cls, name, *args, **kwargs)
 
     def south_field_triple(self):
@@ -272,7 +270,6 @@ class CacheKeyField(models.BigIntegerField):
         self.denorm = denorms.BaseCacheKeyDenorm(depend_on=self.dependencies)
         self.denorm.model = cls
         self.denorm.fieldname = name
-        models.signals.class_prepared.connect(self.denorm.register, sender=cls)
         super(CacheKeyField, self).contribute_to_class(cls, name, *args, **kwargs)
 
     def pre_save(self, model_instance, add):

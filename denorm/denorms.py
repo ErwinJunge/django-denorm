@@ -100,7 +100,7 @@ class Denorm(object):
         """
         pass
 
-    def setup(self):
+    def setup(self, **kwargs):
         """
         Calls setup() on all DenormDependency resolvers
         """
@@ -271,7 +271,7 @@ class AggregateDenorm(Denorm):
 
         # related managers will only be available after both models are initialized
         # so check if its available already, and get our manager
-        if not self.manager and hasattr(self.model, str(self.manager_name)):
+        if not self.manager and hasattr(self, 'model') and hasattr(self.model, str(self.manager_name)):
             self.manager = getattr(self.model, self.manager_name)
 
     def get_related_where(self, fk_name, using, type):

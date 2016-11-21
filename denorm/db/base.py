@@ -1,6 +1,5 @@
 from django.db import models, connections, connection, transaction
 from ..helpers import remote_field_model
-from django.contrib.contenttypes.generic import GenericRelation
 
 
 class RandomBigInt(object):

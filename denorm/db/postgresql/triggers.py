@@ -88,7 +88,7 @@ class Trigger(base.Trigger):
                 END;
             """ % locals()
 
-        name = truncate_name(self.name(), self.connection.ops.max_name_length() - 5)
+        name = truncate_name(name, self.connection.ops.max_name_length() - 5)
         params = []
         action_list = []
         actions_added = set()
@@ -140,9 +140,10 @@ class TriggerSet(base.TriggerSet):
 
         if not cursor.fetchall():
             cursor.execute('CREATE LANGUAGE plpgsql')
-        for name, trigger in self.triggers.items():
-            sql, args = trigger.sql()
-            cursor.execute(sql, args)
+        for name, triggers in self.triggers.items():
+            for i, trigger in enumerate(triggers):
+                sql, args = trigger.sql(name + "_%s" % i)
+                cursor.execute(sql, args)
 
     def install(self):
         try:

@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-from denorm.helpers import find_fks, find_m2ms, remote_field_model
-from django.contrib.contenttypes.generic import GenericRelation
+from denorm.helpers import remote_field_model
 from django.db import models
 from django.db.models.fields import related
 from django.db import connections, connection
 import denorm
-from django.contrib import contenttypes
-import six
+from denorm.db import triggers
+from django.core.exceptions import FieldDoesNotExist
 
 
 class DenormDependency(object):
@@ -46,8 +45,9 @@ class DependOnField(DenormDependency):
         field_names = self.field_lookup.split('__')
         if len(field_names) > 2:
             raise ValueError("%s field lookup spans more than one relationship." % self.field_lookup)
-
-        (self.field, _, direct, m2m) = this_model._meta.get_field_by_name(field_names[0])
+        self.field = this_model._meta.get_field(field_names[0])
+        direct = not self.field.auto_created or self.field.concrete
+        m2m = self.field.many_to_many
 
         if m2m:
             if direct:
@@ -57,20 +57,23 @@ class DependOnField(DenormDependency):
                 self.type = "m2m backward"
                 self.other_model = self.field.model
         else:
-            if direct:
-                if isinstance(self.field, related.RelatedObject) and isinstance(self.field.field, GenericRelation):
+            if self.field.is_relation and direct:
+                if self.field.one_to_many:
                     self.type = "backward"
                     self.other_model = self.field.field.rel.to
-                    self.field = self.other_model._meta.get_field_by_name(self.field.field.object_id_field_name)[0]
-                elif isinstance(self.field.rel, related.ManyToOneRel):
+                    self.field = self.other_model._meta.get_field(self.field.field.object_id_field_name)
+                elif self.field.many_to_one or self.field.one_to_one:
                     self.type = "forward"
                     self.other_model = self.field.rel.to
                 else:
                     self.type = ''
             else:
-                self.type = "backward"
+                if self.field.is_relation:
+                    self.type = "backward"
+                    self.field = self.field.field
+                else:
+                    self.type = "self"
                 self.other_model = self.field.model
-                self.field = self.field.field
 
         if self.type == '' and len(field_names) > 1:
             raise ValueError("%s field lookup invalid." % self.field_lookup)
@@ -83,6 +86,7 @@ class DependOnField(DenormDependency):
 class CacheKeyDependOnField(DependOnField):
 
     def get_triggers(self, using):
+        from django.contrib.contenttypes.models import ContentType
 
         trigger_list = []
 
@@ -235,6 +239,8 @@ class CacheKeyDependOnField(DependOnField):
 
 class CallbackDependOnField(DependOnField):
     def get_triggers(self, using):
+        from django.contrib.contenttypes.models import ContentType
+        from denorm.models import DirtyInstance
 
         trigger_list = []
 
@@ -327,6 +333,7 @@ class CallbackDependOnField(DependOnField):
         if "m2m" in self.type:
             # The two directions of M2M relations only differ in the column
             # names used in the intermediate table.
+            qn = self.get_quote_name(using)
             if isinstance(self.field, models.ManyToManyField):
                 if "forward" in self.type:
                     column_name = qn(self.field.m2m_column_name())

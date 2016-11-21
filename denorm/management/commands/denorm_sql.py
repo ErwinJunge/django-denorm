@@ -8,7 +8,8 @@ class Command(BaseCommand):
     def handle(self, **options):
         triggerset = denorms.build_triggerset()
         sql_list = []
-        for name, trigger in triggerset.triggers.items():
-            sql, params = trigger.sql()
-            sql_list.append(sql % tuple(params))
+        for name, triggers in triggerset.triggers.items():
+            for i, trigger in enumerate(triggers):
+                sql, params = trigger.sql(name + "_%s" % i)
+                sql_list.append(sql % tuple(params))
         print('\n'.join(sql_list))
