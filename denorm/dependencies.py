@@ -52,7 +52,7 @@ class DependOnField(DenormDependency):
         if m2m:
             if direct:
                 self.type = "m2m forward"
-                self.other_model = self.field.rel.to
+                self.other_model = self.field.related_model
             else:
                 self.type = "m2m backward"
                 self.other_model = self.field.model
@@ -64,7 +64,7 @@ class DependOnField(DenormDependency):
                     self.field = self.other_model._meta.get_field(self.field.field.object_id_field_name)
                 elif self.field.many_to_one or self.field.one_to_one:
                     self.type = "forward"
-                    self.other_model = self.field.rel.to
+                    self.other_model = self.field.related_model
                 else:
                     self.type = ''
             else:

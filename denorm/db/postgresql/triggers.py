@@ -88,7 +88,7 @@ class Trigger(base.Trigger):
                 END;
             """ % locals()
 
-        name = truncate_name(self.name(), self.connection.ops.max_name_length() - 5)
+        name = truncate_name(name, self.connection.ops.max_name_length() - 5)
         params = []
         action_list = []
         actions_added = set()
